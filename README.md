@@ -6,6 +6,49 @@ operations used by map-based route applications.
 The package was created from the route interaction problems encountered in
 an application that supports both Apple Maps and Google Maps.
 
+🔥 The complete flow
+
+<img width="1536" height="721" alt="KD-Tree" src="https://github.com/user-attachments/assets/f362821f-0c0f-44b1-82ac-32e6b9843952" />
+
+<img width="464" height="326" alt="Query" src="https://github.com/user-attachments/assets/6b87df19-ba9d-49e6-b0bc-2baecc4f073d" />
+
+<img width="1282" height="724" alt="Segment Cases" src="https://github.com/user-attachments/assets/72797a22-efde-4b5b-99f9-d0462e8a2425" />
+
+
+                   USER TAPS MAP
+                         │
+                         ▼
+                 Tap coordinate
+                         │
+                         ▼
+                      KDTree
+                         │
+                         │ nearest recorded point
+                         ▼
+                KDTreeResult<Model>
+                  ├── model
+                  ├── index
+                  └── coordinate
+                         │
+                         ▼
+               Nearby route points
+                         │
+                         ▼
+             PolylineProximityAnalyzer
+                         │
+                         │ point-to-segment distance
+                         ▼
+                   distance
+                    /     \
+                   /       \
+              within       outside
+             tolerance     tolerance
+                 │              │
+                 ▼              ▼
+            ROUTE HIT       NOT A HIT
+
+
+
 ## Why this package exists
 
 The original problem was not simply "find the nearest coordinate."
