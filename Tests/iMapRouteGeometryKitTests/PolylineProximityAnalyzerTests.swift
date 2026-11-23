@@ -20,10 +20,13 @@ final class PolylineProximityAnalyzerTests: XCTestCase {
             searchRadius: 1
         )
 
-        XCTAssertNotNil(result)
-        XCTAssertEqual(result?.segmentIndex, 0)
-        XCTAssertEqual(result?.closestPoint.x, 50, accuracy: 0.001)
-        XCTAssertEqual(result?.closestPoint.y, 0, accuracy: 0.001)
+        guard let result else {
+            XCTFail("Expected a nearest route segment")
+            return
+        }
+        XCTAssertEqual(result.segmentIndex, 0)
+        XCTAssertEqual(result.closestPoint.x, CGFloat(50), accuracy: CGFloat(0.001))
+        XCTAssertEqual(result.closestPoint.y, CGFloat(0), accuracy: CGFloat(0.001))
     }
 
     func testTapFarFromPolylineIsRejected() {

@@ -27,6 +27,12 @@ public final class KDTreeNode<Model> {
     /// - `1`: Longitude
     public let axis: Int
 
+    /// The model's position in the original input sequence.
+    public let index: Int
+
+    /// The number of nodes in this subtree.
+    public internal(set) var subtreeCount: Int
+
     /// The left child node.
     ///
     /// Nodes in this subtree contain values on the lower side of the
@@ -53,10 +59,14 @@ public final class KDTreeNode<Model> {
     init(
         model: Model,
         coordinate: CLLocationCoordinate2D,
-        axis: Int
+        axis: Int,
+        index: Int,
+        subtreeCount: Int = 1
     ) {
         self.model = model
         self.coordinate = coordinate
         self.axis = axis
+        self.index = index
+        self.subtreeCount = subtreeCount
     }
 }

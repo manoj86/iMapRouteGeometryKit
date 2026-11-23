@@ -1,5 +1,11 @@
 import CoreLocation
 
+private struct KDTreeEntry<Model> {
+    let model: Model
+    let coordinate: CLLocationCoordinate2D
+    let index: Int
+}
+
 /// A generic two-dimensional KD-tree for efficiently searching map-route coordinates.
 ///
 /// `KDTree` can store any model type. The caller provides a coordinate provider
@@ -54,8 +60,13 @@ public final class KDTree<Model> {
         self.models = models
         self.coordinateProvider = coordinateProvider
         self.root = KDTree.build(
-            models: models,
-            coordinateProvider: coordinateProvider,
+            entries: models.enumerated().map {
+                KDTreeEntry(
+                    model: $0.element,
+                    coordinate: coordinateProvider($0.element),
+                    index: $0.offset
+                )
+            },
             depth: 0
         )
     }
@@ -133,6 +144,7 @@ public extension KDTree {
                 bestDistance = distance
                 bestModel = node.model
                 bestCoordinate = node.coordinate
+                bestIndex = node.index
             }
 
             let axis = node.axis
@@ -172,14 +184,6 @@ public extension KDTree {
         guard let bestModel, let bestCoordinate else {
             return nil
         }
-
-        // The KD-tree is internally sorted. Recover the original model index.
-        bestIndex = models.firstIndex { model in
-            areCoordinatesEqual(
-                coordinateProvider(model),
-                bestCoordinate
-            )
-        } ?? -1
 
         guard bestIndex >= 0 else {
             return nil
@@ -245,27 +249,26 @@ public extension KDTree {
 
 public extension KDTree {
 
-    /// Appends models to the existing collection and rebuilds the KD-tree.
+    /// Appends models using incremental insertion, rebalancing subtrees as needed.
     ///
     /// Use this when additional route coordinates need to be added to
     /// an existing tree.
     ///
     /// - Parameter newModels: Models to append to the tree.
     ///
-    /// - Note: Rebuilding the tree means this operation is more expensive
-    ///   than simply appending to an array.
-    ///
     /// Example:
     ///
     ///     tree.update(with: newCoordinates)
     func update(with newModels: [Model]) {
-        models.append(contentsOf: newModels)
-
-        root = KDTree.build(
-            models: models,
-            coordinateProvider: coordinateProvider,
-            depth: 0
-        )
+        for model in newModels {
+            let entry = KDTreeEntry(
+                model: model,
+                coordinate: coordinateProvider(model),
+                index: models.count
+            )
+            models.append(model)
+            root = insert(entry, into: root, depth: 0)
+        }
     }
 
     /// Replaces all existing models and rebuilds the KD-tree.
@@ -279,8 +282,13 @@ public extension KDTree {
         models = newModels
 
         root = KDTree.build(
-            models: models,
-            coordinateProvider: coordinateProvider,
+            entries: models.enumerated().map {
+                KDTreeEntry(
+                    model: $0.element,
+                    coordinate: coordinateProvider($0.element),
+                    index: $0.offset
+                )
+            },
             depth: 0
         )
     }
@@ -305,51 +313,114 @@ private extension KDTree {
     ///
     /// - Returns: The root node of the constructed subtree.
     static func build(
-        models: [Model],
-        coordinateProvider: (Model) -> CLLocationCoordinate2D,
+        entries: [KDTreeEntry<Model>],
         depth: Int
     ) -> KDTreeNode<Model>? {
 
-        guard !models.isEmpty else {
+        guard !entries.isEmpty else {
             return nil
         }
 
         let axis = depth % 2
 
-        let sorted = models.sorted {
-            let a = coordinateProvider($0)
-            let b = coordinateProvider($1)
-
-            return axis == 0
-                ? a.latitude < b.latitude
-                : a.longitude < b.longitude
+        let sorted = entries.sorted {
+            let lhsValue = axis == 0
+                ? $0.coordinate.latitude
+                : $0.coordinate.longitude
+            let rhsValue = axis == 0
+                ? $1.coordinate.latitude
+                : $1.coordinate.longitude
+            return lhsValue == rhsValue
+                ? $0.index < $1.index
+                : lhsValue < rhsValue
         }
 
         let mid = sorted.count / 2
-        let model = sorted[mid]
-        let coordinate = coordinateProvider(model)
+        let entry = sorted[mid]
 
         let node = KDTreeNode(
-            model: model,
-            coordinate: coordinate,
-            axis: axis
+            model: entry.model,
+            coordinate: entry.coordinate,
+            axis: axis,
+            index: entry.index,
+            subtreeCount: sorted.count
         )
 
         node.left = build(
-            models: Array(sorted[..<mid]),
-            coordinateProvider: coordinateProvider,
+            entries: Array(sorted[..<mid]),
             depth: depth + 1
         )
 
         if mid + 1 < sorted.count {
             node.right = build(
-                models: Array(sorted[(mid + 1)...]),
-                coordinateProvider: coordinateProvider,
+                entries: Array(sorted[(mid + 1)...]),
                 depth: depth + 1
             )
         }
 
         return node
+    }
+
+    func insert(
+        _ entry: KDTreeEntry<Model>,
+        into node: KDTreeNode<Model>?,
+        depth: Int
+    ) -> KDTreeNode<Model> {
+        guard let node else {
+            return KDTreeNode(
+                model: entry.model,
+                coordinate: entry.coordinate,
+                axis: depth % 2,
+                index: entry.index
+            )
+        }
+
+        let nodeValue = node.axis == 0
+            ? node.coordinate.latitude
+            : node.coordinate.longitude
+        let entryValue = node.axis == 0
+            ? entry.coordinate.latitude
+            : entry.coordinate.longitude
+        let goesLeft = entryValue < nodeValue
+            || (entryValue == nodeValue && entry.index < node.index)
+
+        if goesLeft {
+            node.left = insert(entry, into: node.left, depth: depth + 1)
+        } else {
+            node.right = insert(entry, into: node.right, depth: depth + 1)
+        }
+        node.subtreeCount += 1
+
+        let largestChildCount = max(
+            node.left?.subtreeCount ?? 0,
+            node.right?.subtreeCount ?? 0
+        )
+        if largestChildCount > (node.subtreeCount * 3) / 4 {
+            return rebuild(node, depth: depth)
+        }
+        return node
+    }
+
+    func rebuild(_ node: KDTreeNode<Model>, depth: Int) -> KDTreeNode<Model> {
+        var entries: [KDTreeEntry<Model>] = []
+        appendEntries(from: node, to: &entries)
+        return Self.build(entries: entries, depth: depth)!
+    }
+
+    func appendEntries(
+        from node: KDTreeNode<Model>?,
+        to entries: inout [KDTreeEntry<Model>]
+    ) {
+        guard let node else { return }
+        entries.append(
+            KDTreeEntry(
+                model: node.model,
+                coordinate: node.coordinate,
+                index: node.index
+            )
+        )
+        appendEntries(from: node.left, to: &entries)
+        appendEntries(from: node.right, to: &entries)
     }
 }
 
@@ -385,19 +456,4 @@ private extension KDTree {
         value * value
     }
 
-    /// Determines whether two coordinates have identical latitude and
-    /// longitude values.
-    ///
-    /// - Parameters:
-    ///   - lhs: First coordinate.
-    ///   - rhs: Second coordinate.
-    ///
-    /// - Returns: `true` when both coordinates are identical.
-    func areCoordinatesEqual(
-        _ lhs: CLLocationCoordinate2D,
-        _ rhs: CLLocationCoordinate2D
-    ) -> Bool {
-        lhs.latitude == rhs.latitude &&
-        lhs.longitude == rhs.longitude
-    }
 }
